@@ -87,6 +87,7 @@ VEGETATION_IDS = {21, 22}        # vegetation, terrain
 SKY_MODIFIER = 0.2
 GROUND_MODIFIER = 1.5
 VEGETATION_MODIFIER = 1.1
+DEFAULT_SIGMA = 20.0
 
 
 def build_beta_map(
@@ -128,7 +129,7 @@ def main():
     ap.add_argument("--split", default="train")
     ap.add_argument("--city", default="aachen")
     ap.add_argument("--beta-base", type=float, default=1.0)
-    ap.add_argument("--sigma", type=float, default=20.0, help="gaussian smoothing of beta map (FID-optimized default)")
+    ap.add_argument("--sigma", type=float, default=DEFAULT_SIGMA, help="gaussian smoothing of beta map (FID-optimized default)")
     ap.add_argument("--sky-mod", type=float, default=SKY_MODIFIER, help="sky category modifier (flat, always)")
     ap.add_argument("--road-mod", type=float, default=GROUND_MODIFIER, help="ground/road category modifier (depth-scaled by default)")
     ap.add_argument("--veg-mod", type=float, default=VEGETATION_MODIFIER, help="vegetation category modifier (depth-scaled by default)")
