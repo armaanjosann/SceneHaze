@@ -81,7 +81,7 @@ def main():
     save_image(np.repeat(mcbm_betamap_vis[:, :, None], 3, axis=2), mcbm_betamap_path)
 
     # --- ours: scene-grounded ---
-    grounded_beta_map = build_grounded_beta_map(seg, B, args.sigma)
+    grounded_beta_map = build_grounded_beta_map(seg, depth, B, args.sigma)
     grounded_foggy = apply_asm(clean, depth, grounded_beta_map)
     grounded_stem = f"{args.image}_betabase{B:.2f}_grounded"
     grounded_path = GROUNDED_ROOT / args.split / args.city / f"{grounded_stem}.png"
