@@ -1,0 +1,32 @@
+# Data: clean images, depth maps, segmentation labels, generated fog outputs.
+# clean/ and segmentation/ are symlinks into local Cityscapes downloads
+# (machine-specific paths, recreated by scripts/setup_data.py); depth/ and
+# generated/ are regenerable via scripts/extract_depth.py, generate_*.py.
+# All of it is too large/derived to belong in git.
+data/
+
+# Results: comparison figures, diffs — regenerable via scripts/*comparison*.py
+results/
+
+# Third-party clone (HazeFlow), has its own git history. Re-clone via:
+#   git clone https://github.com/cloor/HazeFlow.git external/HazeFlow
+external/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS cruft
+.DS_Store
+
+# Numpy arrays (depth caches, etc.)
+*.npy
+
+# Model weights / checkpoints
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.h5
+*.onnx
+*.bin
