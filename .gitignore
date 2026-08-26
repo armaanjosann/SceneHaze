@@ -3,10 +3,26 @@
 # (machine-specific paths, recreated by scripts/setup_data.py); depth/ and
 # generated/ are regenerable via scripts/extract_depth.py, generate_*.py.
 # All of it is too large/derived to belong in git.
-data/
+#
+# NOTE: these are per-subdirectory (not a blanket `data/`) so that
+# data/fid_calibration/image_manifest.json can still be tracked below --
+# git cannot re-include a file whose parent directory is itself excluded,
+# so a blanket parent exclusion + `!` negation for one file does NOT work.
+data/clean/
+data/depth/
+data/segmentation/
+data/generated/
+data/evaluation/
+# FID calibration writes ~500 regenerable PNGs per sweep into per-variant
+# subdirectories here; the manifest JSON (which 50 images + beta_base per
+# image) sits directly in data/fid_calibration/ and is deliberately NOT
+# matched by this directory-only pattern.
+data/fid_calibration/*/
 
-# Results: comparison figures, diffs — regenerable via scripts/*comparison*.py
-results/
+# Results: comparison figures, diffs — regenerable via scripts/*comparison*.py.
+# results/metrics/ is deliberately not ignored: it only ever holds small
+# CSV/JSON summaries (e.g. FID calibration results) worth tracking.
+results/comparisons/
 
 # Third-party clone (HazeFlow), has its own git history. Re-clone via:
 #   git clone https://github.com/cloor/HazeFlow.git external/HazeFlow
@@ -18,6 +34,9 @@ __pycache__/
 
 # OS cruft
 .DS_Store
+
+# Local Claude Code runtime state (not project content)
+.claude/
 
 # Numpy arrays (depth caches, etc.)
 *.npy

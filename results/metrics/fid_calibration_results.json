@@ -1,0 +1,82 @@
+[
+  {
+    "variant": "combined_best_guess",
+    "sky_mod": 0.2,
+    "road_mod": 1.5,
+    "veg_mod": 1.1,
+    "sigma": 20,
+    "fid": 292.81962814651615
+  },
+  {
+    "variant": "road_higher",
+    "sky_mod": 0.3,
+    "road_mod": 1.5,
+    "veg_mod": 1.1,
+    "sigma": 15,
+    "fid": 296.84751902894817
+  },
+  {
+    "variant": "veg_higher",
+    "sky_mod": 0.3,
+    "road_mod": 1.3,
+    "veg_mod": 1.2,
+    "sigma": 15,
+    "fid": 298.15732259935635
+  },
+  {
+    "variant": "sky_lower",
+    "sky_mod": 0.2,
+    "road_mod": 1.3,
+    "veg_mod": 1.1,
+    "sigma": 15,
+    "fid": 298.47938600032563
+  },
+  {
+    "variant": "sigma_higher",
+    "sky_mod": 0.3,
+    "road_mod": 1.3,
+    "veg_mod": 1.1,
+    "sigma": 25,
+    "fid": 298.69049134049595
+  },
+  {
+    "variant": "current",
+    "sky_mod": 0.3,
+    "road_mod": 1.3,
+    "veg_mod": 1.1,
+    "sigma": 15,
+    "fid": 300.89083215220705
+  },
+  {
+    "variant": "veg_lower",
+    "sky_mod": 0.3,
+    "road_mod": 1.3,
+    "veg_mod": 1.0,
+    "sigma": 15,
+    "fid": 302.4573554090818
+  },
+  {
+    "variant": "road_lower",
+    "sky_mod": 0.3,
+    "road_mod": 1.2,
+    "veg_mod": 1.1,
+    "sigma": 15,
+    "fid": 302.62924098215274
+  },
+  {
+    "variant": "sky_higher",
+    "sky_mod": 0.4,
+    "road_mod": 1.3,
+    "veg_mod": 1.1,
+    "sigma": 15,
+    "fid": 303.2068484965315
+  },
+  {
+    "variant": "sigma_lower",
+    "sky_mod": 0.3,
+    "road_mod": 1.3,
+    "veg_mod": 1.1,
+    "sigma": 10,
+    "fid": 303.5909245836646
+  }
+]

@@ -5,12 +5,15 @@ Same ASM equation as Piece 1, but beta becomes a per-pixel map instead of a
 scalar: beta(x) = beta_base * category_modifier(x), where the modifier comes
 from Cityscapes ground-truth semantic labels (_gtFine_labelIds.png).
 
-  Sky              (23)              x0.3              flat — fog thins above the boundary layer
+  Sky              (23)              x0.2              flat — fog thins above the boundary layer
                                                           regardless of this pixel's own depth (sky
                                                           is always effectively "far")
-  Ground/road      (7,8,9,10)        x(1.0 + 0.3*depth)  depth-scaled by default (see below)
+  Ground/road      (7,8,9,10)        x(1.0 + 0.5*depth)  depth-scaled by default (see below)
   Low vegetation   (21,22)           x(1.0 + 0.1*depth)  depth-scaled by default
   Everything else  (incl. structures) x1.0                default — no change from baseline
+
+  (Gaussian smoothing sigma=20 by default. All four values are FID-optimized
+  against real NH-HAZE fog — see scripts/fid_calibration.py.)
 
 Depth-scaled modifiers (default): fog accumulates with distance beyond what
 the transmission term t(x)=exp(-beta*depth) already captures on its own — a
@@ -77,12 +80,25 @@ GROUND_IDS = {7, 8, 9, 10}       # road, sidewalk, parking, rail track
 VEGETATION_IDS = {21, 22}        # vegetation, terrain
 # structures (11-16) and everything else default to x1.0 -> no-op, omitted
 
-SKY_MODIFIER = 0.3
-GROUND_MODIFIER = 1.3
+# FID-optimized (see scripts/fid_calibration.py, results/metrics/fid_calibration_results.csv):
+# swept sky/road/veg/sigma against real NH-HAZE fog on 50 diverse Cityscapes
+# images; combined_best_guess (0.2/1.5/1.1/sigma=20) won with FID=292.8 vs.
+# 300.9 for the original hand-picked values (0.3/1.3/1.1/sigma=15).
+SKY_MODIFIER = 0.2
+GROUND_MODIFIER = 1.5
 VEGETATION_MODIFIER = 1.1
 
 
-def build_beta_map(seg: np.ndarray, depth: np.ndarray, beta_base: float, sigma: float, flat_modifiers: bool = False) -> np.ndarray:
+def build_beta_map(
+    seg: np.ndarray,
+    depth: np.ndarray,
+    beta_base: float,
+    sigma: float,
+    flat_modifiers: bool = False,
+    sky_mod: float = SKY_MODIFIER,
+    ground_mod: float = GROUND_MODIFIER,
+    veg_mod: float = VEGETATION_MODIFIER,
+) -> np.ndarray:
     beta_map = np.full(seg.shape, beta_base, dtype=np.float32)
 
     sky_mask = np.isin(seg, list(SKY_IDS))
@@ -91,17 +107,17 @@ def build_beta_map(seg: np.ndarray, depth: np.ndarray, beta_base: float, sigma: 
 
     # Sky stays flat: "close vs. far" isn't a meaningful distinction for sky
     # pixels the way it is for ground, so no depth-scaling here either way.
-    beta_map[sky_mask] *= SKY_MODIFIER
+    beta_map[sky_mask] *= sky_mod
 
     if flat_modifiers:
-        beta_map[ground_mask] *= GROUND_MODIFIER
-        beta_map[veg_mask] *= VEGETATION_MODIFIER
+        beta_map[ground_mask] *= ground_mod
+        beta_map[veg_mask] *= veg_mod
     else:
         # Depth-scaled: close pixels get only a small fraction of the
         # category boost, distant pixels get the full boost. Reuses the
         # same normalized pseudo-depth already fed into the ASM equation.
-        beta_map[ground_mask] *= 1.0 + (GROUND_MODIFIER - 1.0) * depth[ground_mask]
-        beta_map[veg_mask] *= 1.0 + (VEGETATION_MODIFIER - 1.0) * depth[veg_mask]
+        beta_map[ground_mask] *= 1.0 + (ground_mod - 1.0) * depth[ground_mask]
+        beta_map[veg_mask] *= 1.0 + (veg_mod - 1.0) * depth[veg_mask]
 
     return gaussian_filter(beta_map, sigma=sigma)
 
@@ -112,7 +128,10 @@ def main():
     ap.add_argument("--split", default="train")
     ap.add_argument("--city", default="aachen")
     ap.add_argument("--beta-base", type=float, default=1.0)
-    ap.add_argument("--sigma", type=float, default=15.0, help="gaussian smoothing of beta map")
+    ap.add_argument("--sigma", type=float, default=20.0, help="gaussian smoothing of beta map (FID-optimized default)")
+    ap.add_argument("--sky-mod", type=float, default=SKY_MODIFIER, help="sky category modifier (flat, always)")
+    ap.add_argument("--road-mod", type=float, default=GROUND_MODIFIER, help="ground/road category modifier (depth-scaled by default)")
+    ap.add_argument("--veg-mod", type=float, default=VEGETATION_MODIFIER, help="vegetation category modifier (depth-scaled by default)")
     ap.add_argument("--flat-modifiers", action="store_true", help="ablation: flat category multipliers instead of the default depth-scaled ones")
     ap.add_argument("--turbulence", action="store_true", help="ablation: layer small-scale organic noise on top of the scene-grounded beta map (off by default -- not part of the primary method)")
     ap.add_argument("--turb-strength", type=float, default=0.15, help="std dev of turbulence noise, centered at 1.0")
@@ -131,7 +150,10 @@ def main():
             f"clean/seg/depth must all be the same resolution."
         )
 
-    beta_map = build_beta_map(seg, depth, args.beta_base, args.sigma, args.flat_modifiers)
+    beta_map = build_beta_map(
+        seg, depth, args.beta_base, args.sigma, args.flat_modifiers,
+        sky_mod=args.sky_mod, ground_mod=args.road_mod, veg_mod=args.veg_mod,
+    )
 
     stem = f"{args.image}_betabase{args.beta_base:.2f}_grounded"
     if args.flat_modifiers:
@@ -152,6 +174,7 @@ def main():
     save_image(np.repeat(beta_vis[:, :, None], 3, axis=2), out_dir / f"{stem}_betamap.png")
 
     print(f"beta_base = {args.beta_base}, sigma = {args.sigma}, flat_modifiers = {args.flat_modifiers}")
+    print(f"modifiers: sky={args.sky_mod}, road={args.road_mod}, veg={args.veg_mod}")
     if args.turbulence:
         print(f"turbulence: strength={args.turb_strength}, scale={args.turb_scale}, seed={args.turb_seed}")
     print(f"beta_map range: [{beta_map.min():.3f}, {beta_map.max():.3f}]")

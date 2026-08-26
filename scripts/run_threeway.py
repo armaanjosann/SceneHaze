@@ -48,7 +48,7 @@ def main():
     ap.add_argument("--city", required=True)
     ap.add_argument("--image", required=True, help="image stem, no suffix")
     ap.add_argument("--beta-base", type=float, default=2.0)
-    ap.add_argument("--sigma", type=float, default=15.0, help="gaussian smoothing for grounded beta map")
+    ap.add_argument("--sigma", type=float, default=20.0, help="gaussian smoothing for grounded beta map (FID-optimized default)")
     ap.add_argument("--mcbm-index", type=int, default=None, help="0-999; random (seeded) if omitted")
     ap.add_argument("--scale", type=float, default=None, help="mcbm nh scale; random (seeded) in [0.5,1.0] if omitted")
     ap.add_argument("--seed", type=int, default=0, help="seed for mcbm-index/scale randomness")
