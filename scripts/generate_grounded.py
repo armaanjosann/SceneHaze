@@ -17,9 +17,19 @@ The per-pixel beta map is then Gaussian-smoothed (sigma=15 by default) so
 category boundaries don't create harsh fog edges — real fog doesn't respect
 segmentation masks.
 
+Optional --turbulence layers small-scale organic variation on top of that
+large-scale structure: the beta map is multiplied by smooth noise centered
+at 1.0 (see fog_utils.apply_turbulence), so pockets of slightly thicker or
+thinner fog appear within a single terrain type, without disturbing the
+sky/ground/vegetation structure itself.
+
 Usage:
   python3 scripts/generate_grounded.py \
       --image aachen_000000_000019 --split train --city aachen --beta-base 1.0
+
+  python3 scripts/generate_grounded.py \
+      --image aachen_000000_000019 --split train --city aachen --beta-base 1.0 \
+      --turbulence --turb-strength 0.15 --turb-scale 20 --turb-seed 0
 """
 
 import argparse
@@ -30,6 +40,7 @@ from scipy.ndimage import gaussian_filter
 from fog_utils import (
     PROJECT_ROOT,
     apply_asm,
+    apply_turbulence,
     disparity_to_pseudo_depth,
     load_clean,
     load_disparity,
@@ -65,6 +76,10 @@ def main():
     ap.add_argument("--city", default="aachen")
     ap.add_argument("--beta-base", type=float, default=1.0)
     ap.add_argument("--sigma", type=float, default=15.0, help="gaussian smoothing of beta map")
+    ap.add_argument("--turbulence", action="store_true", help="layer small-scale organic noise on top of the scene-grounded beta map")
+    ap.add_argument("--turb-strength", type=float, default=0.15, help="std dev of turbulence noise, centered at 1.0")
+    ap.add_argument("--turb-scale", type=float, default=20.0, help="gaussian sigma smoothing the turbulence noise field (bigger = softer/larger blobs)")
+    ap.add_argument("--turb-seed", type=int, default=None, help="seed for turbulence noise (reproducibility)")
     args = ap.parse_args()
 
     clean = load_clean(args.split, args.city, args.image)
@@ -79,11 +94,15 @@ def main():
         )
 
     beta_map = build_beta_map(seg, args.beta_base, args.sigma)
+
+    stem = f"{args.image}_betabase{args.beta_base:.2f}_grounded"
+    if args.turbulence:
+        beta_map = apply_turbulence(beta_map, args.turb_strength, args.turb_scale, args.turb_seed)
+        stem += f"_turb{args.turb_strength:.2f}-{args.turb_scale:.0f}"
+
     foggy = apply_asm(clean, depth, beta_map)
 
     out_dir = OUT_ROOT / args.split / args.city
-    stem = f"{args.image}_betabase{args.beta_base:.2f}_grounded"
-
     save_image(foggy, out_dir / f"{stem}.png")
 
     # Also save a visualization of the beta map itself — useful for sanity
@@ -93,6 +112,8 @@ def main():
     save_image(np.repeat(beta_vis[:, :, None], 3, axis=2), out_dir / f"{stem}_betamap.png")
 
     print(f"beta_base = {args.beta_base}, sigma = {args.sigma}")
+    if args.turbulence:
+        print(f"turbulence: strength={args.turb_strength}, scale={args.turb_scale}, seed={args.turb_seed}")
     print(f"beta_map range: [{beta_map.min():.3f}, {beta_map.max():.3f}]")
     print(f"Saved: {out_dir / (stem + '.png')}")
     print(f"Saved beta map viz: {out_dir / (stem + '_betamap.png')}")

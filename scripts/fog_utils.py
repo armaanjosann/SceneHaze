@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
+from scipy.ndimage import gaussian_filter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_ROOT = PROJECT_ROOT / "data" / "clean" / "cityscapes"
@@ -62,6 +63,34 @@ def apply_asm(clean: np.ndarray, depth: np.ndarray, beta, A: np.ndarray = ATMOSP
 def save_image(arr: np.ndarray, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray((arr * 255).astype(np.uint8)).save(path)
+
+
+def apply_turbulence(beta_map: np.ndarray, strength: float = 0.15, scale: float = 20.0, seed: int = None) -> np.ndarray:
+    """Layer small-scale organic variation on top of a beta map: multiply by
+    smooth noise centered at 1.0 (mean-preserving), so pockets of slightly
+    thicker/thinner fog appear within an otherwise-uniform category (e.g.
+    within "road") without disturbing the large-scale scene structure
+    (sky vs. ground) already encoded in beta_map.
+
+    strength: target std dev of the *final* (post-smoothing) noise field —
+              bigger = more contrast between thick/thin pockets.
+    scale:    gaussian sigma used to smooth the noise (bigger = larger,
+              softer blobs; smaller = finer-grained turbulence).
+    seed:     for reproducibility — same seed + strength + scale always
+              gives the same noise field.
+
+    Note: Gaussian-smoothing a white noise field crushes its amplitude, more
+    so the larger `scale` is (e.g. strength=0.15 at scale=20 survives
+    smoothing at only ~1% of its original std). So we smooth first, then
+    renormalize to the requested std — this keeps `strength` and `scale`
+    acting as independent, literal knobs (contrast vs. blob size) instead of
+    strength's effect silently depending on scale.
+    """
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(0.0, 1.0, size=beta_map.shape)
+    noise = gaussian_filter(noise, sigma=scale)
+    noise = noise / (noise.std() + 1e-8) * strength
+    return beta_map * (1.0 + noise)
 
 
 # --- shared comparison-figure helpers -------------------------------------
