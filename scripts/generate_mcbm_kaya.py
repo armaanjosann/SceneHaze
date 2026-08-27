@@ -1,27 +1,46 @@
 """
-Generate the MCBM (HazeFlow) fog baseline on Kaya, using HazeFlow's actual
-formula from their training dataloader (reflow/datasets.py::MCBM), run here
-as a standalone generation script rather than inside their training loop.
+Generate the MCBM (HazeFlow) fog baseline, using HazeFlow's PUBLISHED
+formula (Shin et al., Eq. 22 in the paper):
 
-Unlike our local scripts/generate_mcbm.py (which deliberately keeps our own
-ASM equation form t=exp(-beta*depth), for a fair comparison against our other
-two methods), THIS script uses HazeFlow's LITERAL formula, including their
-hardcoded depth*2.0 scaling -- maximum fidelity to their published code,
-since the point of running this on Kaya is "the real baseline," not our
-reimplementation of it.
+  T_MCBM(x) = exp( -(beta + alpha * beta_tilde(x)) * d(x) )
+  I(x) = T_MCBM(x) * J(x) + (1 - T_MCBM(x)) * A
 
-  beta_map(x) = nh(x) * scale + beta_base     (scale ~ Uniform(0.5, 1.0),
-                                                matching their own
-                                                (rand()+1)/2 term)
-  t(x) = exp(-depth(x) * 2.0 * beta_map(x))
-  hazy = clean * t + A * (1 - t)
+  where beta ~ Uniform(0.2, 2.8)   -- their scalar draw (we substitute our
+                                      own per-image beta_base instead, for
+                                      comparability with our other methods)
+        alpha ~ Uniform(0.5, 1.0)  -- controls degree of non-homogeneity
+        beta_tilde(x)              -- their Brownian-motion field (datasets/
+                                      MCBM/*.png), normalized to [0,1]
 
-beta_base is OUR per-image value (from mcbm_kaya_selection.json), substituted
-for HazeFlow's own random per-sample draw -- so this stays comparable to our
-other two baselines, which all use this same beta_base per image. Atmospheric
-light A is fixed at our own convention (fog_utils.ATMOSPHERIC_LIGHT, near-
-white) rather than HazeFlow's own random A sampling, for the same reason:
-every other variable stays identical across all three methods except beta.
+IMPORTANT CORRECTION: an earlier version of this script copied a
+`depth * 2.0 * beta` scaling from HazeFlow's GitHub code
+(reflow/datasets.py::MCBM), on the assumption that the repo was the more
+literal ground truth. Reading the actual paper (Eq. 22) shows no such
+constant -- the code's extra `2.0` isn't part of the published equation
+and is most likely an artifact tuned to their specific depth estimator
+(RA-Depth) and dataset (RIDCP500), which we aren't using anyway (we use
+Cityscapes + Depth-Anything-V2). Blindly carrying that constant over onto
+a different depth estimator's output range was the more likely source of
+a highly aggressive fog when this script's original results looked too
+dense. This version follows the paper's equation exactly, with no extra
+depth scaling.
+
+Known, deliberate deviations from the paper, for comparability with our
+other two baselines (documented so this can be cited accurately):
+  - beta_base is OUR per-image value (from mcbm_kaya_selection.json),
+    substituted for their own random per-sample Uniform(0.2, 2.8) draw.
+  - Atmospheric light A is fixed at our own convention
+    (fog_utils.ATMOSPHERIC_LIGHT, near-white) rather than their randomized
+    A ~ Uniform(0.25, 1.8) sampling.
+  - We do NOT apply their Eq. 23 degradation step D(...) (gamma
+    correction + additive Gaussian noise + JPEG compression) -- this
+    affects sensor/compression grain, not the fog's spatial structure,
+    but is a real omission if full fidelity to their training data is
+    the goal.
+  - Clean images are Cityscapes, not their RIDCP500 set; depth comes from
+    Depth-Anything-V2, not their RA-Depth. Both were already-documented
+    substitutions from earlier in this project (RIDCP500's images were
+    only reachable via an inaccessible Baidu Disk link).
 
 No GPU needed -- this is plain numpy/PIL image arithmetic, no model
 inference involved.
@@ -51,8 +70,7 @@ from PIL import Image
 
 from fog_utils import ATMOSPHERIC_LIGHT, disparity_to_pseudo_depth, save_image
 
-SCALE_RANGE = (0.5, 1.0)  # matches HazeFlow's own (np.random.rand()+1)/2
-DEPTH_SCALE_FACTOR = 2.0  # matches HazeFlow's own t = exp(-depth * 2.0 * beta)
+SCALE_RANGE = (0.5, 1.0)  # matches HazeFlow's own alpha ~ Uniform(0.5, 1.0)
 
 
 def load_mcbm_field(hazeflow_root: Path, index: int, shape) -> np.ndarray:
@@ -95,8 +113,8 @@ def main():
         scale = rng.uniform(*SCALE_RANGE)
         nh = load_mcbm_field(args.hazeflow_root, mcbm_index, depth.shape)
 
-        beta_map = nh * scale + beta_base
-        t = np.exp(-depth * DEPTH_SCALE_FACTOR * beta_map)
+        beta_map = nh * scale + beta_base  # beta + alpha*beta_tilde, per Eq. 22
+        t = np.exp(-depth * beta_map)      # T_MCBM, per Eq. 22 (no extra depth scaling)
         hazy = np.clip(clean * t[:, :, None] + ATMOSPHERIC_LIGHT * (1 - t[:, :, None]), 0, 1)
 
         out_dir = args.output_root / split / city
