@@ -1,0 +1,142 @@
+[
+  {
+    "split": "train",
+    "city": "stuttgart",
+    "image": "stuttgart_000195_000019",
+    "beta_base": 1.7826,
+    "score": 1.38
+  },
+  {
+    "split": "train",
+    "city": "ulm",
+    "image": "ulm_000047_000019",
+    "beta_base": 0.7936,
+    "score": 1.372
+  },
+  {
+    "split": "train",
+    "city": "bremen",
+    "image": "bremen_000129_000019",
+    "beta_base": 1.1077,
+    "score": 1.343
+  },
+  {
+    "split": "train",
+    "city": "strasbourg",
+    "image": "strasbourg_000001_043748",
+    "beta_base": 0.6976,
+    "score": 1.338
+  },
+  {
+    "split": "train",
+    "city": "erfurt",
+    "image": "erfurt_000089_000019",
+    "beta_base": 0.9093,
+    "score": 1.291
+  },
+  {
+    "split": "train",
+    "city": "tubingen",
+    "image": "tubingen_000118_000019",
+    "beta_base": 1.6283,
+    "score": 1.262
+  },
+  {
+    "split": "train",
+    "city": "aachen",
+    "image": "aachen_000158_000019",
+    "beta_base": 1.5632,
+    "score": 1.229
+  },
+  {
+    "split": "train",
+    "city": "dusseldorf",
+    "image": "dusseldorf_000053_000019",
+    "beta_base": 1.374,
+    "score": 1.229
+  },
+  {
+    "split": "val",
+    "city": "lindau",
+    "image": "lindau_000054_000019",
+    "beta_base": 1.6101,
+    "score": 1.224
+  },
+  {
+    "split": "val",
+    "city": "frankfurt",
+    "image": "frankfurt_000001_060906",
+    "beta_base": 0.5289,
+    "score": 1.222
+  },
+  {
+    "split": "val",
+    "city": "munster",
+    "image": "munster_000030_000019",
+    "beta_base": 0.84,
+    "score": 1.217
+  },
+  {
+    "split": "train",
+    "city": "hamburg",
+    "image": "hamburg_000000_005639",
+    "beta_base": 0.635,
+    "score": 1.169
+  },
+  {
+    "split": "train",
+    "city": "darmstadt",
+    "image": "darmstadt_000016_000019",
+    "beta_base": 0.9292,
+    "score": 1.166
+  },
+  {
+    "split": "train",
+    "city": "hanover",
+    "image": "hanover_000000_018213",
+    "beta_base": 1.3885,
+    "score": 1.161
+  },
+  {
+    "split": "train",
+    "city": "cologne",
+    "image": "cologne_000110_000019",
+    "beta_base": 1.5877,
+    "score": 1.157
+  },
+  {
+    "split": "train",
+    "city": "monchengladbach",
+    "image": "monchengladbach_000000_000076",
+    "beta_base": 1.1561,
+    "score": 1.157
+  },
+  {
+    "split": "train",
+    "city": "krefeld",
+    "image": "krefeld_000000_036299",
+    "beta_base": 1.6167,
+    "score": 1.141
+  },
+  {
+    "split": "train",
+    "city": "zurich",
+    "image": "zurich_000039_000019",
+    "beta_base": 1.3883,
+    "score": 1.14
+  },
+  {
+    "split": "train",
+    "city": "jena",
+    "image": "jena_000112_000019",
+    "beta_base": 1.0125,
+    "score": 1.14
+  },
+  {
+    "split": "train",
+    "city": "weimar",
+    "image": "weimar_000012_000019",
+    "beta_base": 1.0565,
+    "score": 1.109
+  }
+]
