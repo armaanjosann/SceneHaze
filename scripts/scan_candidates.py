@@ -26,6 +26,7 @@ SEG_ROOT = PROJECT_ROOT / "data" / "segmentation" / "cityscapes"
 
 SKY_ID = 23
 ROAD_ID = 7
+VEGETATION_IDS = (21, 22)  # vegetation, terrain
 
 
 def score_image(seg: np.ndarray) -> dict:
@@ -42,11 +43,17 @@ def score_image(seg: np.ndarray) -> dict:
         rows_with_road = np.where(road_mask.any(axis=1))[0]
         topmost_road_frac = float(rows_with_road.min()) / h  # smaller = road reaches farther/higher
 
-    score = sky_frac_upper + (1.0 - topmost_road_frac)
+    veg_frac = float(np.isin(seg, VEGETATION_IDS).mean())
+
+    # sky openness + road reaching into the distance + vegetation presence:
+    # all three categories carry a scene-grounded modifier, so scoring all
+    # three finds images where the effect has the most surface area to act on.
+    score = sky_frac_upper + (1.0 - topmost_road_frac) + veg_frac
     return {
         "sky_frac_upper": sky_frac_upper,
         "road_frac": road_frac,
         "topmost_road_frac": topmost_road_frac,
+        "veg_frac": veg_frac,
         "score": score,
     }
 
@@ -77,7 +84,8 @@ def main():
                 f"  {stem}: score={stats['score']:.3f} "
                 f"sky_upper={stats['sky_frac_upper']:.3f} "
                 f"road_frac={stats['road_frac']:.3f} "
-                f"road_topmost={stats['topmost_road_frac']:.3f}"
+                f"road_topmost={stats['topmost_road_frac']:.3f} "
+                f"veg_frac={stats['veg_frac']:.3f}"
             )
 
 
