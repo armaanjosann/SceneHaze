@@ -65,6 +65,13 @@ CONSTANT_ROOT = PROJECT_ROOT / "data" / "generated" / "constant_beta"
 GROUNDED_ROOT = PROJECT_ROOT / "data" / "generated" / "scene_grounded"
 SHUFFLED_ROOT = PROJECT_ROOT / "data" / "generated" / "scene_grounded_shuffled"  # net-new arm, folder doesn't exist yet
 
+RAIN_CONSTANT_ROOT = PROJECT_ROOT / "data" / "generated" / "rain_constant"
+RAIN_GROUNDED_ROOT = PROJECT_ROOT / "data" / "generated" / "rain_grounded"
+RAIN_SHUFFLED_ROOT = PROJECT_ROOT / "data" / "generated" / "rain_shuffled"  # arm not implemented (deferred to
+# extensions, see rain design proposal) -- path predicted for schema
+# consistency only, same as fog's shuffled path existed before shuffled
+# generation happened.
+
 EXPECTED_ENTRY_COUNT = 3475
 ORIGINAL_BETA_SEED = 42  # generate_dataset.py::build_manifest's seed, at time of original generation
 
@@ -123,6 +130,36 @@ def fog_file_paths(split: str, city: str, image: str, beta_base: float) -> dict:
         "shuffled": {
             "rgb": str((SHUFFLED_ROOT / split / city / f"{shuffled_stem}.png").relative_to(PROJECT_ROOT)),
             "aux": str((SHUFFLED_ROOT / split / city / f"{shuffled_stem}_aux.npz").relative_to(PROJECT_ROOT)),
+        },
+    }
+
+
+def rain_file_paths(split: str, city: str, image: str, rain_rate: float) -> dict:
+    """Predictable paths for rain's three arms, analogous to
+    fog_file_paths above but keyed on rain_rate instead of beta_base.
+    1 decimal place (rain_rate spans 10-150; fog's 2dp precision, needed
+    for its 0.4-2.0 range, would be overkill here). Called from
+    populate_rain_params.py once rain_rate is assigned -- unlike fog's
+    original migration, rain_rate is known before generation happens, so
+    these paths are computable immediately rather than staying null."""
+    r = f"{rain_rate:.1f}"
+
+    constant_stem = f"{image}_rain{r}_constant"
+    grounded_stem = f"{image}_rain{r}_grounded"
+    shuffled_stem = f"{image}_rain{r}_shuffled"
+
+    return {
+        "constant": {
+            "rgb": str((RAIN_CONSTANT_ROOT / split / city / f"{constant_stem}.png").relative_to(PROJECT_ROOT)),
+            "aux": str((RAIN_CONSTANT_ROOT / split / city / f"{constant_stem}_aux.npz").relative_to(PROJECT_ROOT)),
+        },
+        "grounded": {
+            "rgb": str((RAIN_GROUNDED_ROOT / split / city / f"{grounded_stem}.png").relative_to(PROJECT_ROOT)),
+            "aux": str((RAIN_GROUNDED_ROOT / split / city / f"{grounded_stem}_aux.npz").relative_to(PROJECT_ROOT)),
+        },
+        "shuffled": {
+            "rgb": str((RAIN_SHUFFLED_ROOT / split / city / f"{shuffled_stem}.png").relative_to(PROJECT_ROOT)),
+            "aux": str((RAIN_SHUFFLED_ROOT / split / city / f"{shuffled_stem}_aux.npz").relative_to(PROJECT_ROOT)),
         },
     }
 
