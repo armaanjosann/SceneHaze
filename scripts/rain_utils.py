@@ -154,73 +154,57 @@ def apply_wet_darkening(clean: np.ndarray, wet_mask: np.ndarray) -> np.ndarray:
     return clean * (1.0 - wet_mask[:, :, np.newaxis])
 
 
-WET_SHINE_KERNEL_SIZE = 15  # pixels, maximum_filter neighborhood used to
-# broaden the reflection-sourced brightness into wider highlight patches.
+WET_SHINE_KERNEL_SIZE = 15  # pixels, maximum_filter neighborhood for the
+# local-brightness proxy apply_wet_shine reads highlights from.
 WET_SHINE_INTENSITY_SCALE = 0.15  # peak shine_intensity at full severity
 # scaling (same min(rain_rate/100,1.0) cap wet_mask/reflection_mask use).
-WET_SHINE_SKY_FLOOR_SCALE = 0.6  # floor brightness (as a fraction of
-# atmospheric_light) used wherever the reflection itself is dim -- e.g. a
-# column reflecting a dark building facade rather than open sky. Without
-# this floor, shine would vanish exactly where a wet road often still
-# shows real-world highlight (ambient sky-glow, not a direct mirror hit).
+# Empirical starting point per spec, not yet visually calibrated.
 
 
-def normalize_wet_gate(wet_mask: np.ndarray) -> np.ndarray:
-    """Normalizes wet_mask to its own [0,1] range for use as a spatial
-    GATE in shine/saturation -- NOT for darkening, which uses raw
-    wet_mask (correctly calibrated at ~15% peak, confirmed by design
-    review). wet_mask's raw peak (~0.15) was sized for darkening;
-    reusing it directly as an intensity multiplier for shine/saturation
-    silently capped both at ~15% of their stated value (see v8_shine/
-    v9_sat's near-invisible results and diagnostics -- this was the
-    root cause). Normalizing lets those two effects reach their full
-    stated intensity on the wettest pixels while darkening itself is
-    untouched."""
-    peak = float(wet_mask.max())
-    if peak < 1e-8:
-        return np.zeros_like(wet_mask)
-    return np.clip(wet_mask / peak, 0.0, 1.0)
-
-
-def apply_wet_shine(J_wet: np.ndarray, wet_mask: np.ndarray, rain_rate: float, reflection: np.ndarray, atmospheric_light: np.ndarray, kernel_size: int = WET_SHINE_KERNEL_SIZE) -> np.ndarray:
+def apply_wet_shine(J_wet: np.ndarray, wet_mask: np.ndarray, rain_rate: float, seg: np.ndarray, kernel_size: int = WET_SHINE_KERNEL_SIZE) -> np.ndarray:
     """Adds specular highlights to wet surfaces so they read as wet-and-
     shiny rather than just uniformly darker -- component 1 alone
     (darkening only) can look like a dirty/shadowed road rather than a
     rain-wet one.
 
-    SECOND PASS (first pass max-pooled J_wet's own already-dark pixels --
-    physically backwards, and produced a near-invisible max shine of
-    0.0125; see v8_shine's diagnostics). Brightness now comes from
-    `reflection` -- the per-column contact-row mirror already computed by
-    component 2 (build_reflection), broadened via maximum_filter into
-    wider highlight patches. This is physically motivated: a wet surface
-    shines because it mirrors the sky/scene above it, not because it
-    borrows brightness from its own dark pixels. Wherever the mirrored
-    content is itself dim (e.g. reflecting a dark building facade), a
-    floor of `atmospheric_light * WET_SHINE_SKY_FLOOR_SCALE` is blended
-    in via elementwise max, so shine doesn't vanish there.
+    Local brightness is estimated via maximum_filter (kernel_size,
+    default 15px) over J_wet -- a cheap proxy for "how bright is the
+    brightest nearby surface," standing in for a real specular highlight
+    (a mirror-like reflection of nearby bright light sources/sky, not a
+    property of the road's own base color -- this is a level-1
+    approximation of that, not a physically modeled one).
 
-    Gated by normalize_wet_gate(wet_mask) (see that function for why
-    raw wet_mask can't be used directly here), scaled by
-    shine_intensity = WET_SHINE_INTENSITY_SCALE * severity_scale, same
-    min(rain_rate/100,1.0) severity cap as every other quantity in this
-    module.
+    SHIPPED AS-IS (v9_sat): a reflection-sourced version of this
+    function was tried and reverted -- it fixed the "too subtle to see"
+    problem (mean shine at road went from 0.0058 to 0.076) but exposed a
+    real bug in the per-column mirror (unbounded throw distance could
+    reach a blown-out sky pixel and paint a visible white patch on the
+    road at high rain_rate). Fixing that bug properly needs its own
+    iteration; not doing that now -- shipping this weaker but
+    artifact-free version instead. See commit history for the full
+    v8/v9/v10 trace if revisiting this.
 
-    Must run AFTER `reflection` is computed (build_reflection) and AFTER
-    wet darkening, BEFORE apply_reflections' own compositing step and
-    before atmosphere shift -- see generate_rain_grounded.py for the
-    call order.
+    shine_intensity scales with rain_rate the same way wet_mask/
+    reflection_mask's severity scaling does (min(rain_rate/100,1.0)), so
+    light rain barely shines and heavy rain shines noticeably. Applied
+    ONLY where wet_mask>0, scaled by wet_mask itself (proportional to how
+    wet, not flat on/off).
+
+    Runs AFTER wet darkening and BEFORE reflections in the pipeline (see
+    generate_rain_grounded.py) -- reflections composite onto the shined
+    result, not the raw darkened one.
+
+    `seg` is accepted (matches the spec'd signature) but currently
+    unused -- reserved for a possible future category-aware shine (e.g.
+    road vs. sidewalk shining differently) if a flat wet_mask-scaled
+    shine doesn't look right; not wired up since the spec's formula
+    doesn't call for it yet.
     """
     shine_intensity = WET_SHINE_INTENSITY_SCALE * min(rain_rate / RAIN_SEVERITY_CAP, 1.0)
-    gate = normalize_wet_gate(wet_mask)
-
-    reflection_brightness = np.stack(
-        [maximum_filter(reflection[:, :, c], size=kernel_size) for c in range(3)], axis=-1
+    local_brightness = np.stack(
+        [maximum_filter(J_wet[:, :, c], size=kernel_size) for c in range(3)], axis=-1
     )
-    sky_floor = np.asarray(atmospheric_light, dtype=np.float32).reshape(1, 1, 3) * WET_SHINE_SKY_FLOOR_SCALE
-    brightness_source = np.maximum(reflection_brightness, sky_floor)
-
-    shine = gate[:, :, np.newaxis] * shine_intensity * brightness_source
+    shine = wet_mask[:, :, np.newaxis] * shine_intensity * local_brightness
     return np.clip(J_wet + shine, 0.0, 1.0)
 
 
@@ -286,17 +270,21 @@ def apply_wet_saturation(J: np.ndarray, wet_mask: np.ndarray, rain_rate: float, 
     """Color intensification on wet surfaces -- wet asphalt looks richer
     in color, not just darker, which darkening (component 1) and shine
     don't capture on their own. Converts to HSV, scales the S channel by
-    (1 + saturation_boost * gate * severity_scale), converts back.
-    SECOND PASS: gate is normalize_wet_gate(wet_mask), not raw wet_mask --
-    the raw version capped this effect at ~15% of its stated value (see
-    v9_sat's 4.3% actual vs. 30% nominal; normalize_wet_gate's docstring
-    has the full root-cause explanation). Severity scaling reuses the
-    same min(rain_rate/100,1.0) cap as every other quantity in this
-    module. Own function (not folded into apply_wet_shine) to match this
-    module's one-function-per-physical-effect convention."""
+    (1 + saturation_boost * wet_mask * severity_scale), converts back.
+    Severity scaling reuses the same min(rain_rate/100,1.0) cap as every
+    other wet/reflection quantity in this module. Own function (not
+    folded into apply_wet_shine) to match this module's one-function-
+    per-physical-effect convention.
+
+    SHIPPED AS-IS (v9_sat): the effective boost at road/sidewalk pixels
+    is ~4-5% (not the nominal 30%), since wet_mask itself peaks at ~0.15
+    there. A normalized-gate version that reaches the full nominal boost
+    was tried and reverted alongside apply_wet_shine's reflection-sourced
+    version -- see that function's docstring for why. Shipping the
+    weaker but well-understood version rather than the stronger one with
+    an open bug."""
     hsv = rgb_to_hsv(np.clip(J, 0.0, 1.0))
-    gate = normalize_wet_gate(wet_mask)
-    boost = saturation_boost * gate * min(rain_rate / RAIN_SEVERITY_CAP, 1.0)
+    boost = saturation_boost * wet_mask * min(rain_rate / RAIN_SEVERITY_CAP, 1.0)
     hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1.0 + boost), 0.0, 1.0)
     return np.clip(hsv_to_rgb(hsv), 0.0, 1.0)
 
@@ -304,15 +292,14 @@ def apply_wet_saturation(J: np.ndarray, wet_mask: np.ndarray, rain_rate: float, 
 # --- component 2: wet surface reflections ------------------------------------
 
 REFLECTION_MASK_WEIGHTS = {
-    ROAD_ID: 0.20,  # bumped from 0.08 (v10 wet-surface pass): the direct
-    # reflection composite (apply_reflections, separate from shine's now-
-    # reflection-sourced brightness) was measured too subtle to read as
-    # visibly wet (mean contribution 0.022 at road in the v3-v5 pass).
-    # This is the one wet-surface mechanism that's both geometrically
-    # validated (post blur-order fix) and physically correct, so pushed
-    # up here rather than adding another parallel weak effect.
-    SIDEWALK_ID: 0.12,  # bumped from 0.05, same ratio to ROAD_ID preserved (~1.7x)
-    # everything else defaults to 0.0
+    ROAD_ID: 0.08,
+    SIDEWALK_ID: 0.05,
+    # everything else defaults to 0.0. A bump to 0.20/0.12 (v10 pass) was
+    # tried and reverted -- it made a real bug in build_reflection's
+    # unbounded mirror throw distance visible as a white patch on the
+    # road at high rain_rate (see apply_wet_shine's docstring for the
+    # full trace). Reverted alongside shine/saturation rather than fix
+    # the mirror bug in this pass.
 }
 REFLECTION_BLUR_SIGMA = 30.0
 REFLECTION_MASK_SIGMA = 15.0

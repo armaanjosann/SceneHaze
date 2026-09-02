@@ -77,16 +77,12 @@ def render_grounded(clean, depth, seg, image, rain_rate, streak_seed):
     the single-image CLI equivalent of this same sequence."""
     wet_mask = build_wet_mask(seg, rain_rate)
     j_wet = apply_wet_darkening(clean, wet_mask)
+    j_shine = apply_wet_shine(j_wet, wet_mask, rain_rate, seg)
+    j_saturated = apply_wet_saturation(j_shine, wet_mask, rain_rate)
 
-    # moved earlier than its original position -- shine (v10) sources
-    # brightness from `reflection`, which doesn't depend on darkening/
-    # shine/saturation, only on clean+seg, so this reordering is free.
     contact_rows = compute_contact_rows(seg)
     reflection = build_reflection(clean, contact_rows)
     reflection_mask = build_reflection_mask(seg, rain_rate)
-
-    j_shine = apply_wet_shine(j_wet, wet_mask, rain_rate, reflection, ATMOSPHERIC_LIGHT)
-    j_saturated = apply_wet_saturation(j_shine, wet_mask, rain_rate)
     j_wet_reflect = apply_reflections(j_saturated, reflection, reflection_mask)
 
     gamma, blue_boost = sample_atmosphere_shift(image, rain_rate)

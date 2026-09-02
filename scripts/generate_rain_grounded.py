@@ -81,21 +81,14 @@ def main():
     # component 1: wet surface darkening
     wet_mask = build_wet_mask(seg, args.rain_rate)
     j_wet = apply_wet_darkening(clean, wet_mask)
+    j_shine = apply_wet_shine(j_wet, wet_mask, args.rain_rate, seg)
+    j_saturated = apply_wet_saturation(j_shine, wet_mask, args.rain_rate)
 
-    # component 2's mirror is computed here (moved earlier than its
-    # original position) because shine (v10) now sources its brightness
-    # from `reflection` -- contact_rows/reflection/reflection_mask don't
-    # depend on darkening/shine/saturation, only on clean+seg, so this
-    # reordering is free.
+    # component 2: wet surface reflections (composites onto the
+    # darkened+shined+saturated result)
     contact_rows = compute_contact_rows(seg)
     reflection = build_reflection(clean, contact_rows)
     reflection_mask = build_reflection_mask(seg, args.rain_rate)
-
-    j_shine = apply_wet_shine(j_wet, wet_mask, args.rain_rate, reflection, ATMOSPHERIC_LIGHT)
-    j_saturated = apply_wet_saturation(j_shine, wet_mask, args.rain_rate)
-
-    # component 2: wet surface reflections composite onto the
-    # darkened+shined+saturated result
     j_wet_reflect = apply_reflections(j_saturated, reflection, reflection_mask)
 
     # component 3: global atmosphere shift (applied to J_wet_reflect and to A together)
