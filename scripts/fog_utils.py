@@ -65,6 +65,28 @@ def save_image(arr: np.ndarray, path: Path):
     Image.fromarray((arr * 255).astype(np.uint8)).save(path)
 
 
+def save_aux(veiling_density: np.ndarray, path: Path, surface_effect: np.ndarray = None, particle_alpha: np.ndarray = None):
+    """Save the standard 3-channel per-arm aux array (schema shared across
+    fog/rain/snow, see data/dataset_manifest.json's file_paths.<weather>.
+    <arm>.aux): a single float16 array under key "aux", shape (H,W,3):
+      channel 0 - veiling density, 1 - exp(-beta*depth). Range [0,1].
+      channel 1 - surface-effect magnitude (rain wet-darkening etc). Zero for fog.
+      channel 2 - particle alpha (snow accumulation etc). Zero for fog.
+    Channels 1/2 are always saved even when zero (a fog-only caller doesn't
+    pass surface_effect/particle_alpha) -- schema consistency across
+    weather types matters more than the small size overhead of the
+    all-zero channels, and np.savez_compressed compresses them to near
+    nothing anyway."""
+    h, w = veiling_density.shape
+    if surface_effect is None:
+        surface_effect = np.zeros((h, w), dtype=np.float32)
+    if particle_alpha is None:
+        particle_alpha = np.zeros((h, w), dtype=np.float32)
+    aux = np.stack([veiling_density, surface_effect, particle_alpha], axis=-1).astype(np.float16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, aux=aux)
+
+
 def apply_turbulence(beta_map: np.ndarray, strength: float = 0.15, scale: float = 20.0, seed: int = None) -> np.ndarray:
     """Layer small-scale organic variation on top of a beta map: multiply by
     smooth noise centered at 1.0 (mean-preserving), so pockets of slightly

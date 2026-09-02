@@ -16,12 +16,15 @@ Usage:
 import argparse
 from pathlib import Path
 
+import numpy as np
+
 from fog_utils import (
     PROJECT_ROOT,
     apply_asm,
     disparity_to_pseudo_depth,
     load_clean,
     load_disparity,
+    save_aux,
     save_image,
 )
 
@@ -45,9 +48,18 @@ def main():
     out_path = OUT_ROOT / args.split / args.city / f"{args.image}_beta{args.beta:.2f}_constant.png"
     save_image(foggy, out_path)
 
+    # Aux artifact for the manifest schema: channel 0 = veiling density
+    # (1 - transmission). Beta is scalar here, but depth still varies
+    # per-pixel, so this channel isn't uniform even for the constant arm.
+    # Channels 1/2 stay zero for fog.
+    veiling_density = 1.0 - np.exp(-args.beta * depth)
+    aux_path = out_path.with_name(out_path.stem + "_aux.npz")
+    save_aux(veiling_density, aux_path)
+
     print(f"beta = {args.beta}")
     print(f"pseudo-depth range: [{depth.min():.3f}, {depth.max():.3f}]")
     print(f"Saved: {out_path}")
+    print(f"Saved aux: {aux_path}")
 
 
 if __name__ == "__main__":

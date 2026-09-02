@@ -69,6 +69,7 @@ from fog_utils import (
     load_clean,
     load_disparity,
     load_seg_labels,
+    save_aux,
     save_image,
 )
 
@@ -174,6 +175,13 @@ def main():
     beta_vis = (beta_map - beta_map.min()) / (beta_map.max() - beta_map.min() + 1e-8)
     save_image(np.repeat(beta_vis[:, :, None], 3, axis=2), out_dir / f"{stem}_betamap.png")
 
+    # Aux artifact for the manifest schema: channel 0 = veiling density
+    # (1 - transmission), the same t(x) that fed apply_asm above, computed
+    # from the FINAL beta_map (post-turbulence, if enabled) so aux matches
+    # whatever actually produced the RGB. Channels 1/2 stay zero for fog.
+    veiling_density = 1.0 - np.exp(-beta_map * depth)
+    save_aux(veiling_density, out_dir / f"{stem}_aux.npz")
+
     print(f"beta_base = {args.beta_base}, sigma = {args.sigma}, flat_modifiers = {args.flat_modifiers}")
     print(f"modifiers: sky={args.sky_mod}, road={args.road_mod}, veg={args.veg_mod}")
     if args.turbulence:
@@ -181,6 +189,7 @@ def main():
     print(f"beta_map range: [{beta_map.min():.3f}, {beta_map.max():.3f}]")
     print(f"Saved: {out_dir / (stem + '.png')}")
     print(f"Saved beta map viz: {out_dir / (stem + '_betamap.png')}")
+    print(f"Saved aux: {out_dir / (stem + '_aux.npz')}")
 
 
 if __name__ == "__main__":
