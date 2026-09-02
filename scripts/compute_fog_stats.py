@@ -1,30 +1,44 @@
 """
-Session B of the fog retrofit: compute per-arm stats (mean_abs_delta,
-mean_transmission, grounding_depth_corr, grounding_seg_mi) for the
-constant and grounded fog arms, and write them into the manifest.
+Sessions B+C of the fog retrofit: compute per-arm stats (mean_abs_delta,
+mean_transmission, grounding_depth_corr, grounding_ref_corr) for the
+constant, grounded, AND shuffled fog arms, and write them into the
+manifest.
 
-Generates nothing -- reads existing RGB, aux .npz (Session A), depth, and
+Generates nothing -- reads existing RGB, aux .npz, depth, and
 segmentation, computes four numbers per arm per image, and populates
 data/dataset_manifest.json's fog.<arm>.stats fields via manifest_io's
 lock/atomic-write pattern.
 
-Shuffled arm is skipped entirely -- doesn't exist yet.
+grounding_ref_corr replaces an earlier grounding_seg_mi (mutual
+information vs. raw segmentation labels) that turned out to be
+structurally incapable of distinguishing grounded from shuffled: MI is
+invariant to any bijective relabeling of either variable, and shuffling
+IS exactly a bijective relabeling of which modifier value lands on which
+category -- the underlying category PARTITION (which pixels are
+sky/ground/veg) is identical in both arms, so MI(seg, beta_map) comes out
+statistically identical whether the "correct" or a shuffled mapping was
+used. Verified this empirically (not just theoretically) before deciding
+to replace it -- see commit history. grounding_ref_corr instead measures
+Pearson correlation between THIS arm's beta_map and the CANONICAL
+grounded beta_map for the same image (computed once per image, reused as
+the reference for all three arms). Correlation is not relabeling-
+invariant -- it's sensitive to the actual per-pixel values, not just
+whether SOME informative partition exists. Expected: grounded ~1.0 (it's
+compared against itself), constant ~0 (no variance), shuffled distinctly
+lower (low/negative, varies by which categories got swapped).
 
-Resumable: an entry is skipped if fog.constant.stats.mean_abs_delta is
-already non-null.
+Per-arm resumability: for each entry, only the arms whose
+stats.mean_abs_delta is still null get (re)computed. An arm is silently
+skipped (left null) if its RGB/aux files don't exist yet on disk -- this
+makes the script safe to run BEFORE shuffled generation has happened
+(computes constant+grounded, leaves shuffled null) and again AFTER
+(picks up shuffled), without needing a --arms flag to tell it which
+phase it's in.
 
-Locking note: the manifest is read once at the START (outside the lock),
-since the compute phase over 3,475 images takes long enough that holding
-the file lock for the whole duration would be poor lock hygiene (blocks
-any other script from touching the manifest for that whole time, for no
-real benefit in a single-agent context). The lock is only taken at the
-END, around a final re-read-and-merge-then-write: re-read the manifest
-inside the lock, merge this run's freshly-computed stats into that
-CURRENT on-disk state (not the possibly-stale copy read at the start),
-then atomic_write_manifest(). This is deliberately stricter than "read
-once, write the in-memory copy back" -- it avoids a lost-update race if
-anything else touched the manifest while this script was computing,
-without paying for a multi-minute lock hold.
+Locking note: unchanged from Session B -- manifest read once at the
+START (outside any lock), lock only taken at the END around a
+re-read-and-merge-then-write, to avoid holding the file lock for the
+whole multi-minute compute phase.
 
 Usage:
   python3 scripts/compute_fog_stats.py            # full batch
@@ -32,20 +46,22 @@ Usage:
 """
 
 import argparse
-import math
+import random
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 from scipy.stats import pearsonr
-from sklearn.metrics import mutual_info_score
 
 from fog_utils import PROJECT_ROOT, load_clean, load_disparity, load_seg_labels, disparity_to_pseudo_depth
-from generate_grounded import build_beta_map, DEFAULT_SIGMA
+from generate_grounded import build_beta_map, DEFAULT_SIGMA, SKY_MODIFIER, GROUND_MODIFIER, VEGETATION_MODIFIER
+from generate_shuffled import compute_derangements
 from manifest_io import read_manifest, atomic_write_manifest, acquire_lock, DEFAULT_MANIFEST_PATH
 
-N_MI_BINS = 50
 ZERO_VARIANCE_EPS = 1e-8
+ARMS = ["constant", "grounded", "shuffled"]
+
+_DERANGEMENTS = compute_derangements(SKY_MODIFIER, GROUND_MODIFIER, VEGETATION_MODIFIER)
 
 
 def load_rgb01(path: Path) -> np.ndarray:
@@ -53,33 +69,24 @@ def load_rgb01(path: Path) -> np.ndarray:
     return np.array(Image.open(path).convert("RGB")).astype(np.float32) / 255.0
 
 
-def bin_continuous(arr: np.ndarray, n_bins: int = N_MI_BINS) -> np.ndarray:
-    lo, hi = float(arr.min()), float(arr.max())
-    if hi - lo < ZERO_VARIANCE_EPS:
-        return np.zeros(arr.shape, dtype=np.int64)
-    bins = np.floor((arr - lo) / (hi - lo) * n_bins).astype(np.int64)
-    return np.clip(bins, 0, n_bins - 1)
+def is_zero_variance(arr: np.ndarray) -> bool:
+    return bool(arr.max() - arr.min() < ZERO_VARIANCE_EPS)
 
 
 def compute_grounding_depth_corr(beta_map: np.ndarray, depth: np.ndarray) -> float:
-    if beta_map.max() - beta_map.min() < ZERO_VARIANCE_EPS:
+    if is_zero_variance(beta_map):
         return 0.0
     return float(pearsonr(beta_map.ravel(), depth.ravel())[0])
 
 
-def compute_grounding_seg_mi(beta_map: np.ndarray, seg: np.ndarray) -> float:
-    if beta_map.max() - beta_map.min() < ZERO_VARIANCE_EPS:
-        # single unique value (constant arm) -> MI is exactly 0 by
-        # construction; skip the sklearn call entirely rather than binning
-        # a degenerate constant array.
+def compute_grounding_ref_corr(beta_map: np.ndarray, reference_beta_map: np.ndarray) -> float:
+    if is_zero_variance(beta_map) or is_zero_variance(reference_beta_map):
         return 0.0
-    binned = bin_continuous(beta_map)
-    mi_nats = mutual_info_score(seg.ravel(), binned.ravel())
-    return float(mi_nats / math.log(2))  # nats -> bits
+    return float(pearsonr(beta_map.ravel(), reference_beta_map.ravel())[0])
 
 
 def compute_arm_stats(foggy_rgb: np.ndarray, clean_rgb: np.ndarray, beta_map: np.ndarray,
-                       depth: np.ndarray, seg: np.ndarray, aux_path: Path) -> dict:
+                       reference_beta_map: np.ndarray, depth: np.ndarray, aux_path: Path) -> dict:
     mean_abs_delta = float(np.mean(np.abs(foggy_rgb - clean_rgb)))
 
     aux = np.load(aux_path)["aux"]
@@ -88,9 +95,25 @@ def compute_arm_stats(foggy_rgb: np.ndarray, clean_rgb: np.ndarray, beta_map: np
     return {
         "mean_abs_delta": mean_abs_delta,
         "grounding_depth_corr": compute_grounding_depth_corr(beta_map, depth),
-        "grounding_seg_mi": compute_grounding_seg_mi(beta_map, seg),
+        "grounding_ref_corr": compute_grounding_ref_corr(beta_map, reference_beta_map),
         "mean_transmission": mean_transmission,
     }
+
+
+def build_beta_map_for_arm(arm: str, seg: np.ndarray, depth: np.ndarray, beta_base: float, shuffle_seed) -> np.ndarray:
+    if arm == "constant":
+        return np.full(depth.shape, beta_base, dtype=np.float32)
+    if arm == "grounded":
+        return build_beta_map(seg, depth, beta_base, DEFAULT_SIGMA)
+    if arm == "shuffled":
+        if shuffle_seed is None:
+            raise SystemExit("fog.shuffle_seed is null -- run scripts/populate_shuffle_seeds.py first.")
+        permutation = random.Random(shuffle_seed).choice(_DERANGEMENTS)
+        return build_beta_map(
+            seg, depth, beta_base, DEFAULT_SIGMA,
+            sky_mod=permutation["sky"], ground_mod=permutation["ground"], veg_mod=permutation["veg"],
+        )
+    raise ValueError(f"unknown arm: {arm}")
 
 
 def main():
@@ -107,18 +130,21 @@ def main():
 
     n_processed = 0
     n_skipped = 0
+    n_arm_not_ready = 0
 
     for i, entry in enumerate(entries, 1):
         split, city, image = entry["split"], entry["city"], entry["image"]
 
-        if entry["fog"]["constant"]["stats"]["mean_abs_delta"] is not None:
+        arms_needed = [arm for arm in ARMS if entry["fog"][arm]["stats"]["mean_abs_delta"] is None]
+        if not arms_needed:
             n_skipped += 1
             continue
 
         if i % 100 == 0 or i == 1:
-            print(f"[{i}/{len(entries)}] {city}/{image}")
+            print(f"[{i}/{len(entries)}] {city}/{image}  (arms: {arms_needed})")
 
         beta_base = entry["fog"]["beta_base"]
+        shuffle_seed = entry["fog"]["shuffle_seed"]
 
         clean = load_clean(split, city, image)
         disparity = load_disparity(split, city, image)
@@ -129,30 +155,39 @@ def main():
             print(f"  WARNING: shape mismatch (seg={seg.shape}, depth={depth.shape}) -- skipping {city}/{image}")
             continue
 
-        # --- constant arm ---
-        constant_rgb_path = PROJECT_ROOT / entry["file_paths"]["fog"]["constant"]["rgb"]
-        constant_aux_path = PROJECT_ROOT / entry["file_paths"]["fog"]["constant"]["aux"]
-        constant_foggy = load_rgb01(constant_rgb_path)
-        beta_map_constant = np.full(depth.shape, beta_base, dtype=np.float32)
-        constant_stats = compute_arm_stats(constant_foggy, clean, beta_map_constant, depth, seg, constant_aux_path)
+        # canonical reference, computed once per image regardless of which
+        # arms are being processed -- reused as the correlation target for
+        # every arm (including grounded itself, which reuses the identical
+        # array and so correlates at ~1.0 with it trivially).
+        reference_beta_map = build_beta_map(seg, depth, beta_base, DEFAULT_SIGMA)
 
-        # --- grounded arm ---
-        grounded_rgb_path = PROJECT_ROOT / entry["file_paths"]["fog"]["grounded"]["rgb"]
-        grounded_aux_path = PROJECT_ROOT / entry["file_paths"]["fog"]["grounded"]["aux"]
-        grounded_foggy = load_rgb01(grounded_rgb_path)
-        beta_map_grounded = build_beta_map(seg, depth, beta_base, DEFAULT_SIGMA)
-        grounded_stats = compute_arm_stats(grounded_foggy, clean, beta_map_grounded, depth, seg, grounded_aux_path)
+        any_computed = False
+        for arm in arms_needed:
+            rgb_path = PROJECT_ROOT / entry["file_paths"]["fog"][arm]["rgb"]
+            aux_path = PROJECT_ROOT / entry["file_paths"]["fog"][arm]["aux"]
 
-        entry["fog"]["constant"]["stats"] = constant_stats
-        entry["fog"]["grounded"]["stats"] = grounded_stats
+            if not rgb_path.exists() or not aux_path.exists():
+                # arm not generated yet (e.g. shuffled, before its batch
+                # generation has run) -- leave null, not an error.
+                n_arm_not_ready += 1
+                continue
 
-        if args.limit:
-            print(f"  constant: {constant_stats}")
-            print(f"  grounded: {grounded_stats}")
+            foggy = load_rgb01(rgb_path)
+            beta_map = reference_beta_map if arm == "grounded" else build_beta_map_for_arm(arm, seg, depth, beta_base, shuffle_seed)
+            stats = compute_arm_stats(foggy, clean, beta_map, reference_beta_map, depth, aux_path)
+            entry["fog"][arm]["stats"] = stats
+            any_computed = True
 
-        n_processed += 1
+            if args.limit:
+                print(f"  {arm}: {stats}")
 
-    print(f"\nProcessed {n_processed}, skipped {n_skipped} (already had stats), of {len(entries)} considered.")
+        if any_computed:
+            n_processed += 1
+        else:
+            n_skipped += 1
+
+    print(f"\nProcessed {n_processed}, skipped {n_skipped} (all needed arms already done or not ready), "
+          f"of {len(entries)} considered. ({n_arm_not_ready} individual arm-skips for not-yet-generated files.)")
 
     if n_processed == 0:
         print("Nothing new to write -- manifest unchanged.")
@@ -164,9 +199,14 @@ def main():
         n_merged = 0
         for entry in entries:
             key = (entry["split"], entry["city"], entry["image"])
-            if key in current_by_key and entry["fog"]["constant"]["stats"]["mean_abs_delta"] is not None:
-                current_by_key[key]["fog"]["constant"]["stats"] = entry["fog"]["constant"]["stats"]
-                current_by_key[key]["fog"]["grounded"]["stats"] = entry["fog"]["grounded"]["stats"]
+            if key not in current_by_key:
+                continue
+            merged_any = False
+            for arm in ARMS:
+                if entry["fog"][arm]["stats"]["mean_abs_delta"] is not None:
+                    current_by_key[key]["fog"][arm]["stats"] = entry["fog"][arm]["stats"]
+                    merged_any = True
+            if merged_any:
                 n_merged += 1
         atomic_write_manifest(current, DEFAULT_MANIFEST_PATH, lock_token=token)
 

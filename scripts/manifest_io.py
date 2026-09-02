@@ -48,7 +48,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "data" / "dataset_manifest.json"
 
-SCHEMA_VERSION = "2.1"
+SCHEMA_VERSION = "2.2"
 SCHEMA_NOTES = (
     "Per-arm stats must measure spatial structure, not marginal "
     "distributions. Any scalar aggregate over a permuted quantity (e.g. a "
@@ -57,12 +57,16 @@ SCHEMA_NOTES = (
     "(severity_wet_coverage, severity_accumulation_coverage) are dataset "
     "severity/extent descriptors, not ablation-discrimination metrics -- "
     "they are structurally blind to grounded-vs-shuffled for the same "
-    "reason. Use the *_depth_corr / *_seg_mi pairs for ablation "
-    "discrimination (grounding_depth_corr/grounding_seg_mi for fog and "
-    "snow, which have one grounding map each; veiling_/wet_/reflection_"
-    "depth_corr and _seg_mi for rain, which has three independently-"
-    "grounded components). All mutual information values are in bits "
-    "(log2), not nats."
+    "reason. For ablation discrimination between grounded and shuffled "
+    "arms, use grounding_ref_corr -- Pearson correlation between the "
+    "arm's grounding-quantity map (fog: beta_map; rain: veiling beta / "
+    "wet mask / reflection mask; snow: accumulation mask) and the "
+    "canonical grounded map for the same image. Grounded self-correlates "
+    "at ~1.0, shuffled produces low/negative correlation (values "
+    "systematically miscategorised by derangement), constant is ~0 (no "
+    "variance). Note: MI-based stats like grounding_seg_mi were "
+    "considered but are invariant to bijective relabeling -- they can't "
+    "distinguish grounded from shuffled -- see commit history."
 )
 
 

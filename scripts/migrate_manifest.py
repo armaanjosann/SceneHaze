@@ -22,9 +22,16 @@ convention.
 
 Stats shape differs per weather type (see manifest_io.SCHEMA_NOTES for the
 reasoning): fog and snow each have ONE grounding map, so they get a single
-grounding_depth_corr/grounding_seg_mi pair. Rain has THREE independently-
+grounding_depth_corr/grounding_ref_corr pair. Rain has THREE independently-
 grounded components (veiling beta, wet-darkening mask, reflection mask),
-so it gets three separate corr/MI pairs instead. severity_wet_coverage /
+so it gets three separate depth_corr/ref_corr pairs instead. Originally
+these used a *_seg_mi mutual-information field instead of *_ref_corr, but
+MI is invariant to bijective relabeling of either variable -- it can't
+distinguish a correctly-grounded map from a shuffled one that permutes
+which value lands on which category, since both are equally "informative"
+about segmentation. Replaced with ref_corr (Pearson correlation against
+the canonical grounded map), which IS sensitive to the actual values, not
+just partition informativeness. severity_wet_coverage /
 severity_accumulation_coverage are explicitly named severity_* (not
 mean_*) to make clear they're dataset descriptors, not ablation-
 discrimination stats -- they're structurally blind to grounded-vs-shuffled
@@ -64,24 +71,24 @@ ORIGINAL_BETA_SEED = 42  # generate_dataset.py::build_manifest's seed, at time o
 FOG_STATS_TEMPLATE = {
     "mean_abs_delta": None,
     "grounding_depth_corr": None,
-    "grounding_seg_mi": None,
+    "grounding_ref_corr": None,
     "mean_transmission": None,
 }
 RAIN_STATS_TEMPLATE = {
     "mean_abs_delta": None,
     "veiling_depth_corr": None,
-    "veiling_seg_mi": None,
+    "veiling_ref_corr": None,
     "wet_depth_corr": None,
-    "wet_seg_mi": None,
+    "wet_ref_corr": None,
     "reflection_depth_corr": None,
-    "reflection_seg_mi": None,
+    "reflection_ref_corr": None,
     "severity_wet_coverage": None,
     "mean_veiling_transmission": None,
 }
 SNOW_STATS_TEMPLATE = {
     "mean_abs_delta": None,
     "grounding_depth_corr": None,
-    "grounding_seg_mi": None,
+    "grounding_ref_corr": None,
     "severity_accumulation_coverage": None,
 }
 
