@@ -1,14 +1,22 @@
 """
 Piece 4 (rain), baseline arm -- constant-rate rain generation. Mirrors
-generate_constant.py's role for fog: no scene-grounding at all.
+generate_constant.py's role for fog: no scene-grounding.
 
-Per the locked spec (revised during design review from the original
-proposal, which had constant keep the atmosphere-shift step): constant
-skips components 1 (wet darkening), 2 (reflections), AND 3 (atmosphere
-shift) entirely -- the clean image goes straight into veiling (component
-4, uniform/non-seg-modified beta) and then streaks (component 5). Since
-there's no atmosphere-shift step here, the fixed, unshifted
-ATMOSPHERIC_LIGHT is used as-is for A (no gamma/blue_boost applied).
+BUG FIX (found via a constant-vs-grounded brightness diagnostic, see
+commit history): only components 1 (wet darkening) and 2 (reflections)
+are grounded-only -- component 3 (atmosphere shift) is a GLOBAL effect
+(overcast lighting, blue tint) that applies regardless of whether wet
+surfaces are modeled, and previously skipping it here made the constant
+arm systematically miss a real brightness/tone change that grounded got,
+confounding the arms' comparison with something that had nothing to do
+with the wet-surface novel contribution. Constant now applies atmosphere
+shift with the SAME gamma/blue_boost as grounded would for this image
+(sample_atmosphere_shift depends only on image+rain_rate, not on arm, so
+this is automatic -- no extra parameter needed).
+
+Pipeline: clean -> atmosphere shift (component 3) -> veiling (component
+4, uniform/non-seg-modified beta) -> streaks (component 5). Components
+1-2 skipped.
 
 See scripts/rain_utils.py for the underlying math/citations.
 
@@ -32,12 +40,14 @@ from rain_utils import (
     MAX_STREAK_COUNT,
     RAIN_VEILING_C,
     STREAKS_PER_MM,
+    apply_atmosphere_shift,
     apply_streaks,
     apply_veiling,
     build_streak_layer,
     compute_veiling_beta_uniform,
     derive_streak_seed,
     rain_aux_channels,
+    sample_atmosphere_shift,
 )
 
 OUT_ROOT = PROJECT_ROOT / "data" / "generated" / "rain_constant"
@@ -59,10 +69,14 @@ def main():
 
     streak_seed = args.streak_seed if args.streak_seed is not None else derive_streak_seed(args.image)
 
-    # component 4: uniform (non-seg-modified) veiling -- clean image straight
-    # in, fixed unshifted ATMOSPHERIC_LIGHT (components 1-3 skipped)
+    # component 3: global atmosphere shift -- same gamma/blue_boost the
+    # grounded arm would use for this image (depends only on image+rain_rate)
+    gamma, blue_boost = sample_atmosphere_shift(args.image, args.rain_rate)
+    j_shifted, a_shifted = apply_atmosphere_shift(clean, ATMOSPHERIC_LIGHT, gamma, blue_boost)
+
+    # component 4: uniform (non-seg-modified) veiling
     beta_map = compute_veiling_beta_uniform(args.rain_rate, depth.shape, c=args.veiling_c)
-    i_veiled = apply_veiling(clean, depth, beta_map, ATMOSPHERIC_LIGHT)
+    i_veiled = apply_veiling(j_shifted, depth, beta_map, a_shifted)
 
     # component 5: streaks
     streak_alpha, streak_brightness = build_streak_layer(depth.shape, depth, args.rain_rate, streak_seed)
@@ -82,6 +96,7 @@ def main():
 
     n_streaks = min(int(args.rain_rate * STREAKS_PER_MM), MAX_STREAK_COUNT)
     print(f"rain_rate = {args.rain_rate}, streak_seed = {streak_seed}")
+    print(f"gamma = {gamma:.4f}, blue_boost = {blue_boost:.4f}")
     print(f"veiling beta (uniform) = {float(beta_map[0, 0]):.4f}")
     print(f"n_streaks = {n_streaks}")
     print(f"Saved: {out_path}")

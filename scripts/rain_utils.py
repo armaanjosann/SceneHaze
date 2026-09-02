@@ -117,10 +117,20 @@ TERRAIN_ID = 22
 # --- component 1: wet surface darkening --------------------------------------
 
 WET_MASK_WEIGHTS = {
-    ROAD_ID: 0.15,
-    SIDEWALK_ID: 0.15,
-    TERRAIN_ID: 0.10,
-    VEGETATION_ID: 0.0,  # changed from 0.05 (design review): leaves/grass
+    ROAD_ID: 0.60,  # bumped from 0.15 (4x, not the ~1.7x it might look
+    # like from a distance): atmosphere shift's overcast brightening
+    # (kept as x**gamma, brightening -- see apply_atmosphere_shift) was
+    # winning over wet-darkening on ground pixels, leaving grounded's
+    # road brighter than constant's -- backwards for the wet-surface
+    # contribution. Needs to be strong enough to overpower that
+    # brightening on ground pixels specifically, without touching sky/
+    # buildings. Side effect worth knowing: apply_wet_shine and
+    # apply_wet_saturation both multiply by this SAME raw wet_mask, so
+    # this bump also makes shine ~4x stronger and saturation's boost
+    # ~4x stronger as an automatic consequence, not a separate choice.
+    SIDEWALK_ID: 0.55,  # bumped from 0.15
+    TERRAIN_ID: 0.40,  # bumped from 0.10
+    VEGETATION_ID: 0.0,  # unchanged (design review): leaves/grass
     # don't wet-darken the way paved surfaces do -- only road/sidewalk/
     # terrain are genuine wet-darkening surfaces. Left in the dict
     # (rather than omitted) for the same documentation reason PARKING_ID/
@@ -429,9 +439,30 @@ def apply_atmosphere_shift(J: np.ndarray, A: np.ndarray, gamma: float, blue_boos
     """Applies gamma correction (all 3 channels) then a blue-channel boost
     (channel 2 only) to J and to A together, then clips both to [0,1] --
     confirmed order (design review). `np.clip(J, 0, None)` floors J at 0
-    before the fractional-power gamma (x**gamma is NaN for x<0 with
-    non-integer gamma); J should never actually be negative at this point
-    but the floor is cheap insurance."""
+    before the fractional-power gamma (x**exponent is NaN for x<0 with
+    non-integer exponent); J should never actually be negative at this
+    point but the floor is cheap insurance.
+
+    DIRECTION HISTORY (see commit history for both changes): x**gamma
+    with gamma sampled in ~[0.7,0.9] brightens x in (0,1) -- measured
+    +23.9% on road brightness at rain_rate=120. A pass inverted this to
+    x**(1/gamma) to force darkening, which technically worked but then
+    revealed grounded's road ending up BRIGHTER than constant's anyway
+    (7-10% across every test scene), because scene-grounded veiling's
+    ground-category beta boost pulls harder toward the (still bright)
+    atmospheric light than constant's uniform veiling does -- inverting
+    gamma didn't fix that, it just meant both arms started from a lower
+    baseline before hitting the same veiling asymmetry.
+
+    REVERTED back to plain x**gamma (this version). Current design:
+    overcast-brightening from atmosphere shift is treated as physically
+    defensible (bright grey sky + Fresnel reflection can legitimately
+    brighten a rainy scene) and is deliberately the SAME for both arms
+    (constant now calls this too, see generate_rain_constant.py). The
+    wet-vs-dry differentiation is instead pushed entirely onto
+    WET_MASK_WEIGHTS' magnitude (bumped substantially -- see that
+    constant's comment) so darkening wins on ground pixels specifically,
+    while sky/buildings only ever see the shared overcast brightening."""
     J_shifted = np.clip(J, 0.0, None) ** gamma
     J_shifted[:, :, 2] *= blue_boost
     J_shifted = np.clip(J_shifted, 0.0, 1.0)

@@ -60,12 +60,14 @@ from rain_utils import (
 MIN_FREE_GB = 5.0
 
 
-def render_constant(clean, depth, rain_rate, streak_seed):
-    """Components 4 (uniform veiling) + 5 (streaks) only -- see
-    generate_rain_constant.py for the single-image CLI equivalent of this
-    same sequence."""
+def render_constant(clean, depth, image, rain_rate, streak_seed):
+    """Components 3 (atmosphere shift -- bug fix, was skipped) + 4
+    (uniform veiling) + 5 (streaks) -- see generate_rain_constant.py for
+    the single-image CLI equivalent of this same sequence."""
+    gamma, blue_boost = sample_atmosphere_shift(image, rain_rate)
+    j_shifted, a_shifted = apply_atmosphere_shift(clean, ATMOSPHERIC_LIGHT, gamma, blue_boost)
     beta_map = compute_veiling_beta_uniform(rain_rate, depth.shape)
-    i_veiled = apply_veiling(clean, depth, beta_map, ATMOSPHERIC_LIGHT)
+    i_veiled = apply_veiling(j_shifted, depth, beta_map, a_shifted)
     streak_alpha, streak_brightness = build_streak_layer(depth.shape, depth, rain_rate, streak_seed)
     rgb = apply_streaks(i_veiled, streak_alpha, streak_brightness)
     veiling_density, surface_effect = rain_aux_channels(beta_map, depth)
@@ -158,7 +160,7 @@ def main():
             continue
 
         if need_constant:
-            rgb, veiling_density, surface_effect = render_constant(clean, depth, rain_rate, streak_seed)
+            rgb, veiling_density, surface_effect = render_constant(clean, depth, image, rain_rate, streak_seed)
             save_image(rgb, constant_rgb)
             save_aux(veiling_density, constant_aux, surface_effect=surface_effect)
 
